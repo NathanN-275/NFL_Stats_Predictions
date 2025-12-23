@@ -1,10 +1,24 @@
 """
-NFL prediction model to predict the winning team of an upcoming NFL game
+NFL Play Success Prediction Model
+
+This program analyzes NFL play-by-play data from the 2023 season using the
+nfl_data_py library. A play is labeled as "successful" if its Expected Points
+Added (EPA) is greater than zero.
+
+The script:
+- Loads and preprocesses NFL play-by-play data
+- Selects situational and play-type features (down, distance, field position,
+  formation, and score differential)
+- Visualizes feature correlations using a heatmap
+- Trains a logistic regression model to predict play success
+- Displays model coefficients to show feature influence on success
+
+The goal of this project is to explore which game situations and play
+characteristics most strongly contribute to positive play outcomes.
 """
 # NFL Play Prediction Model
 # importing necessary libraries and NFL data
 import nfl_data_py as nfl
-import numpy as np 
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
