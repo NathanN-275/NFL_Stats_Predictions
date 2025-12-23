@@ -1,3 +1,6 @@
+"""
+NFL prediction model to predict the winning team of an upcoming NFL game
+"""
 # NFL Play Prediction Model
 # importing necessary libraries and NFL data
 import nfl_data_py as nfl
@@ -5,7 +8,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-import matplotlib
 
 # importing necessary sklearn libraries
 # for data preprocessing, model building, and evaluation
