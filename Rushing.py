@@ -9,6 +9,7 @@
 import os
 import glob
 import pandas as pd
+import nfl_data_py as nfl
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import Ridge
@@ -18,12 +19,12 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # -----------------------------
-# 0) USER SETTINGS
+# USER SETTINGS
 # -----------------------------
 SEASONS = [2024, 2025]
 DATA_DIR = "."  # folder where nflverse CSVs live
 
-# You can use one combined weekly file (recommended)
+# You can use one combined weekly file 
 PLAYER_WEEKLY_FILE = "stats_player_week.csv"
 
 # Snap counts weekly file name varies sometimes; script will try to auto-find if this is None
@@ -75,7 +76,7 @@ def find_snap_file(data_dir):
     return hits[0] if hits else None
 
 # -----------------------------
-# 1) LOAD WEEKLY PLAYER STATS
+# LOAD WEEKLY PLAYER STATS
 # -----------------------------
 player_path = os.path.join(DATA_DIR, PLAYER_WEEKLY_FILE)
 if not os.path.exists(player_path):
@@ -150,7 +151,7 @@ weekly["rb_rank"] = (
 rb = weekly[weekly["rb_rank"] <= 2].copy()
 
 # -----------------------------
-# 2) LOAD SNAP COUNTS + MERGE SNAP %
+# LOAD SNAP COUNTS + MERGE SNAP %
 # -----------------------------
 snap_path = os.path.join(DATA_DIR, SNAP_WEEKLY_FILE) if SNAP_WEEKLY_FILE else find_snap_file(DATA_DIR)
 if snap_path is None or not os.path.exists(snap_path):
@@ -208,8 +209,8 @@ else:
         rb["snap_pct"] = 0.0
 
 # -----------------------------
-# 3) DEFENSE vs RB FEATURES (rolling allowed)
-#    Build a defense-week table from RB weekly outcomes vs that defense.
+# DEFENSE vs RB FEATURES (rolling allowed)
+# Build a defense-week table from RB weekly outcomes vs that defense.
 # -----------------------------
 # This requires opponent to be meaningful. If opponent == "UNK", these features will be weak.
 def_rb_week = (
@@ -258,7 +259,7 @@ for c in [
     rb_games[c] = rb_games[c].fillna(0.0)
 
 # -----------------------------
-# 4) PLAYER FORM ROLLING FEATURES (shifted)
+# PLAYER FORM ROLLING FEATURES (shifted)
 # -----------------------------
 rb_games = rb_games.sort_values(["player_id", "season", "week"]).reset_index(drop=True)
 
@@ -272,7 +273,7 @@ rb_games = rb_games.dropna(subset=need).copy()
 print(f"\nTraining rows after rolling history: {len(rb_games):,}")
 
 # -----------------------------
-# 5) FEATURES / TARGETS
+# FEATURES / TARGETS
 # -----------------------------
 features = [
     # player form
@@ -361,13 +362,58 @@ else:
     print("Total:", round(eval_df["mae_total"].mean(), 2))
 
 # -----------------------------
-# 7) TRAIN FINAL MODELS ON ALL BUT LATEST WEEK, PREDICT LATEST WEEK
+# TRAIN FINAL MODELS ON ALL BUT LATEST WEEK, PREDICT LATEST WEEK
 # -----------------------------
 print("\nTraining final models and projecting latest week in file...")
 
-latest_tkey = max(all_tkeys)
-train = rb_games_eval[rb_games_eval["tkey"] < latest_tkey]
-latest = rb_games_eval[rb_games_eval["tkey"] == latest_tkey].copy()
+# week 18 of 2025 prediction
+TARGET_WEEK = 18
+TARGET_SEASON = 2025
+
+# train on all real data you have
+train = rb_games_eval.copy()
+
+# use each player's most recent real game as the "week 18 input"
+latest = (
+    rb_games_eval
+    .sort_values(["player_id", "week"])
+    .groupby("player_id")
+    .tail(1)
+    .copy()
+)
+
+
+try:
+    rosters = nfl.import_rosters([TARGET_SEASON])
+    # rosters uses gsis_id; your df uses player_id (you already normalized to "player_id")
+    roster_team = (
+        rosters[["gsis_id", "team"]]
+        .dropna()
+        .drop_duplicates("gsis_id")
+        .rename(columns={"gsis_id": "player_id", "team": "team_roster"})
+    )
+    latest = latest.merge(roster_team, on="player_id", how="left")
+    latest["team"] = latest["team_roster"].fillna(latest["team"])
+    latest = latest.drop(columns=["team_roster"])
+except Exception as e:
+    print("WARNING: roster team update failed (continuing):", e)
+
+# 2) Set OPPONENT from the actual Week 18 schedule (fixes mixed-up opponents)
+sched = nfl.import_schedules([TARGET_SEASON])
+
+# keep regular season, target week
+wk = sched[(sched["season"] == TARGET_SEASON) & (sched["week"] == TARGET_WEEK)]
+if "game_type" in wk.columns:
+    wk = wk[wk["game_type"].isin(["REG", "R"])]
+
+home_map = dict(zip(wk["home_team"], wk["away_team"]))
+away_map = dict(zip(wk["away_team"], wk["home_team"]))
+
+latest["opponent"] = latest["team"].map(home_map).fillna(latest["team"].map(away_map)).fillna("UNK")
+
+latest["week"] = TARGET_WEEK
+latest["season"] = TARGET_SEASON
+latest["tkey"] = TARGET_SEASON * 100 + TARGET_WEEK
 
 X_train = train[features]
 X_latest = latest[features]
